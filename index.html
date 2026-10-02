@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slide Quiz</title>
+<style>
+  /* ---------- Design tokens: change the look here, nowhere else ---------- */
+  :root {
+    --paper: #EEF1F4;   /* background */
+    --panel: #FFFFFF;   /* option cards */
+    --ink:   #1B2A41;   /* main text */
+    --muted: #5B6B80;   /* secondary text */
+    --rule:  #C9D1DB;   /* borders */
+    --pick:  #B9831F;   /* the class's chosen answer */
+    --right: #1F7A6B;   /* correct */
+    --wrong: #8C3B5E;   /* incorrect pick */
+    --serif: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+    --sans:  "Avenir Next", Avenir, "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #16202E; --panel: #1E2A3B; --ink: #E6ECF3; --muted: #9AA9BC;
+      --rule: #2E3C50; --pick: #E0B04E; --right: #4DB8A5; --wrong: #D27BA0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #16202E; --panel: #1E2A3B; --ink: #E6ECF3; --muted: #9AA9BC;
+    --rule: #2E3C50; --pick: #E0B04E; --right: #4DB8A5; --wrong: #D27BA0;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--paper); color: var(--ink); font-family: var(--sans);
+    display: flex; flex-direction: column; min-height: 100%;
+  }
+
+  header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 1rem; flex-wrap: wrap;
+    padding: 1.25rem clamp(1rem, 4vw, 3rem) 0;
+  }
+  header h1 { font-size: 1rem; font-weight: 600; margin: 0; color: var(--muted); }
+  .progress { display: flex; gap: .4rem; align-items: center; }
+  .dot {
+    width: .8rem; height: .8rem; border-radius: 50%;
+    border: 2px solid var(--muted); background: transparent; padding: 0; cursor: pointer;
+  }
+  .dot.done { background: var(--muted); }
+  .dot.here { border-color: var(--ink); transform: scale(1.3); }
+
+  main {
+    flex: 1; width: 100%; max-width: 62rem; margin: 0 auto;
+    padding: clamp(1rem, 4vh, 3rem) clamp(1rem, 4vw, 3rem);
+  }
+  .count { color: var(--muted); font-size: 1rem; margin: 0 0 .75rem; }
+  .prompt {
+    font-family: var(--serif); font-weight: 600;
+    font-size: clamp(1.6rem, 3.1vw, 2.6rem); line-height: 1.3;
+    margin: 0 0 1.75rem; max-width: 34ch;   /* short lines read well from the back row */
+  }
+
+  .options { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+  .option {
+    width: 100%; display: grid; grid-template-columns: 2.6rem 1fr; gap: 1rem;
+    align-items: center; text-align: left; cursor: pointer;
+    font: inherit; font-size: clamp(1.1rem, 1.9vw, 1.55rem); line-height: 1.35;
+    color: var(--ink); background: var(--panel);
+    border: 2px solid var(--rule); border-radius: 12px; padding: .85rem 1.1rem;
+    transition: opacity .3s, border-color .2s;
+  }
+  .option:hover:not(:disabled) { border-color: var(--muted); }
+  .key {
+    width: 2.6rem; height: 2.6rem; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700;
+    border: 2px solid var(--rule); color: var(--muted);
+  }
+  .option.picked { border-color: var(--pick); }
+  .option.picked .key { background: var(--pick); border-color: var(--pick); color: var(--panel); }
+
+  /* After reveal: the right answer stays bright, everything else steps back */
+  .revealed .option { cursor: default; }
+  .revealed .option:not(.correct):not(.picked) { opacity: .4; }
+  .option.correct { border-color: var(--right); }
+  .option.correct .key { background: var(--right); border-color: var(--right); color: var(--panel); }
+  .revealed .option.picked:not(.correct) { border-color: var(--wrong); }
+  .revealed .option.picked:not(.correct) .key { background: var(--wrong); border-color: var(--wrong); }
+
+  .hint, .explanation {
+    margin-top: 1.5rem; padding: 1rem 1.25rem; border-radius: 0 12px 12px 0;
+    background: var(--panel); font-size: clamp(1rem, 1.6vw, 1.3rem); line-height: 1.5;
+    max-width: 60ch;
+  }
+  .hint { border-left: 5px solid var(--pick); }
+  .explanation { border-left: 5px solid var(--right); }
+  .explanation.missed { border-left-color: var(--wrong); }
+  .verdict { font-weight: 700; display: block; margin-bottom: .35rem; }
+  .fresh { animation: rise .45s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(.6rem); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .fresh { animation: none; }
+    .option { transition: none; }
+  }
+
+  body:not(.ready) footer, body:not(.ready) header { visibility: hidden; } /* until a quiz loads */
+  footer {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 1rem; flex-wrap: wrap;
+    padding: 1rem clamp(1rem, 4vw, 3rem) 1.5rem;
+  }
+  .controls { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .controls button {
+    font: inherit; font-size: 1.05rem; font-weight: 600; cursor: pointer;
+    padding: .65rem 1.2rem; border-radius: 999px;
+    border: 2px solid var(--ink); background: transparent; color: var(--ink);
+  }
+  .controls button.primary { background: var(--ink); color: var(--paper); }
+  .controls button:disabled { opacity: .35; cursor: default; }
+  .keys { color: var(--muted); font-size: .9rem; display: flex; gap: 1.1rem; flex-wrap: wrap; }
+  kbd {
+    font-family: var(--sans); font-size: .85em; padding: .05rem .4rem;
+    border: 1px solid var(--rule); border-radius: 4px; background: var(--panel);
+  }
+
+  button:focus-visible { outline: 3px solid var(--pick); outline-offset: 3px; }
+
+  @media (max-width: 600px) {
+    .keys { display: none; }   /* no keyboard on phones, so hide the shortcut legend */
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="quiz-title"></h1>
+  <nav class="progress" id="progress" aria-label="Questions"></nav>
+</header>
+
+<main id="stage" aria-live="polite"></main>
+
+<footer>
+  <div class="controls">
+    <button id="prev">Back</button>
+    <button id="hint">Show hint</button>
+    <button id="reveal" class="primary">Reveal answer</button>
+    <button id="next">Next</button>
+  </div>
+  <div class="keys">
+    <span><kbd>A</kbd>–<kbd>D</kbd> pick</span>
+    <span><kbd>Enter</kbd> reveal, then next</span>
+    <span><kbd>←</kbd> <kbd>→</kbd> move</span>
+    <span><kbd>H</kbd> hint</span>
+    <span><kbd>T</kbd> light/dark</span>
+  </div>
+</footer>
+
+<script>
+/* =====================================================================
+   1. LOADING. Quizzes live in quizzes/<name>.js and are picked by URL:
+      index.html?q=three-lenses loads quizzes/three-lenses.js,
+      which calls loadQuiz({ title, questions }).
+   ===================================================================== */
+let QUIZ = null;
+const quizName = new URLSearchParams(location.search).get("q");
+
+function loadQuiz(data) {
+  QUIZ = data;
+  state.perQuestion = QUIZ.questions.map(() => ({ picked: null, revealed: false, hint: false }));
+  document.getElementById("quiz-title").textContent = QUIZ.title;
+  document.title = QUIZ.title;
+  document.body.classList.add("ready");
+  render();
+}
+
+function showError(headline, detail) {
+  document.getElementById("stage").replaceChildren(
+    el("h2", { className: "prompt" }, headline),
+    el("p", { className: "count" }, detail));
+}
+
+function start() {
+  if (!quizName) return showError("No quiz chosen.", "Add ?q=<quiz-name> to the address, e.g. index.html?q=three-lenses");
+  if (!/^[a-z0-9-]+$/.test(quizName)) return showError("Invalid quiz name.", "Use only lowercase letters, digits and hyphens.");
+  const script = el("script", { src: `quizzes/${quizName}.js` });
+  script.onerror = () => showError(`Quiz “${quizName}” not found.`, `Expected a file at quizzes/${quizName}.js`);
+  script.onload = () => { if (!QUIZ) showError(`Quiz “${quizName}” couldn't be read.`, "The file loaded but never called loadQuiz(). Check it for a syntax error (the browser console will say where)."); };
+  document.head.append(script);
+}
+
+/* =====================================================================
+   2. STATE. Everything the screen shows is derived from these values.
+   ===================================================================== */
+const LETTERS = "ABCDEFGH";
+const state = {
+  index: 0,
+  fresh: false,    // true only right after a reveal, so the explanation animates once
+  perQuestion: []  // filled by loadQuiz()
+};
+const current = () => state.perQuestion[state.index];
+
+/* =====================================================================
+   3. ACTIONS. The only functions allowed to change state.
+      Each one changes state, then calls render(). Nothing else touches the DOM.
+   ===================================================================== */
+function go(i) {
+  if (i < 0 || i >= QUIZ.questions.length) return;
+  state.index = i; state.fresh = false; render();
+}
+function pick(i) {
+  const q = QUIZ.questions[state.index];
+  if (current().revealed || i >= q.options.length) return; // lock the vote once revealed
+  current().picked = (current().picked === i) ? null : i;  // click again to un-pick
+  render();
+}
+function reveal() {
+  if (current().revealed) return;
+  current().revealed = true; state.fresh = true; render();
+}
+function toggleHint() { current().hint = !current().hint; state.fresh = false; render(); }
+
+// Embedded on a reveal.js slide, keys pressed in this iframe never reach the deck.
+// So past either end of the quiz, hand control back via reveal's postMessage API.
+const embedded = window.parent !== window;
+function toDeck(method) {
+  if (!embedded) return;
+  window.parent.postMessage(JSON.stringify({ method }), "*");
+  try { window.parent.focus(); } catch {} // so the next keypress goes to the deck, not this iframe
+}
+function forward() { state.index < QUIZ.questions.length - 1 ? go(state.index + 1) : toDeck("next"); }
+function back()    { state.index > 0 ? go(state.index - 1) : toDeck("prev"); }
+
+/* =====================================================================
+   4. RENDER. Rebuilds the screen from state. Small helper el() keeps it tidy.
+   ===================================================================== */
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  Object.assign(node, props);
+  for (const c of children) node.append(c); // strings become text nodes, so no HTML injection
+  return node;
+}
+
+function render() {
+  const q = QUIZ.questions[state.index];
+  const s = current();
+  const stage = document.getElementById("stage");
+
+  // Options
+  const list = el("ol", { className: "options" });
+  q.options.forEach((text, i) => {
+    const btn = el("button", { className: "option", onclick: () => pick(i) },
+      el("span", { className: "key" }, LETTERS[i]),
+      el("span", {}, text));
+    if (s.picked === i) btn.classList.add("picked");
+    if (s.revealed && i === q.answer) btn.classList.add("correct");
+    if (s.revealed) btn.disabled = true;
+    list.append(el("li", {}, btn));
+  });
+
+  const body = el("div", { className: s.revealed ? "revealed" : "" },
+    el("p", { className: "count" }, `Question ${state.index + 1} of ${QUIZ.questions.length}`),
+    el("h2", { className: "prompt" }, q.prompt),
+    list);
+
+  if (s.hint && !s.revealed) {
+    body.append(el("div", { className: "hint" }, el("span", { className: "verdict" }, "Hint"), q.hint));
+  }
+  if (s.revealed) {
+    const missed = s.picked !== null && s.picked !== q.answer;
+    const verdict = s.picked === null ? `The answer is ${LETTERS[q.answer]}.`
+                  : missed ? q.wrong : q.right;
+    body.append(el("div",
+      { className: "explanation" + (missed ? " missed" : "") + (state.fresh ? " fresh" : "") },
+      el("span", { className: "verdict" }, verdict), q.explanation));
+  }
+  stage.replaceChildren(body);
+
+  // Progress dots
+  const nav = document.getElementById("progress");
+  nav.replaceChildren(...QUIZ.questions.map((_, i) => {
+    const d = el("button", { className: "dot", onclick: () => go(i),
+      ariaLabel: `Question ${i + 1}` });
+    if (state.perQuestion[i].revealed) d.classList.add("done");
+    if (i === state.index) d.classList.add("here");
+    return d;
+  }));
+
+  // Footer buttons reflect state too
+  document.getElementById("prev").disabled = state.index === 0;
+  document.getElementById("next").disabled = state.index === QUIZ.questions.length - 1;
+  document.getElementById("reveal").disabled = s.revealed;
+  document.getElementById("hint").disabled = s.revealed;
+  document.getElementById("hint").textContent = s.hint ? "Hide hint" : "Show hint";
+}
+
+/* =====================================================================
+   5. INPUT. Buttons and keys both just call actions.
+   ===================================================================== */
+document.getElementById("prev").onclick = () => go(state.index - 1);
+document.getElementById("next").onclick = () => go(state.index + 1);
+document.getElementById("reveal").onclick = reveal;
+document.getElementById("hint").onclick = toggleHint;
+
+document.addEventListener("keydown", (e) => {
+  if (!QUIZ || e.metaKey || e.ctrlKey || e.altKey) return; // not loaded yet, or a browser shortcut
+  const k = e.key.toLowerCase();
+  let handled = true;
+  if (k === "arrowright") forward();
+  else if (k === "arrowleft" || k === "pageup") back();
+  else if (k === "enter" || k === " " || k === "pagedown") current().revealed ? forward() : reveal(); // PageDown: clickers
+  else if (k === "h") { if (!current().revealed) toggleHint(); }
+  else if (k === ".") toDeck("togglePause");                     // clicker blackout button
+  else if (k === "escape" || k === "o") toDeck("toggleOverview");
+  else if (k === "t") {
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark"
+               : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+  }
+  else if (LETTERS.toLowerCase().includes(k) && k.length === 1) pick(LETTERS.toLowerCase().indexOf(k));
+  else if (/^[1-8]$/.test(k)) pick(Number(k) - 1);
+  else handled = false;
+  if (handled) e.preventDefault(); // stops Space scrolling and Enter double-firing a focused button
+});
+
+start();
+</script>
+</body>
+</html>
